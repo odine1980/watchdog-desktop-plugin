@@ -29,6 +29,9 @@ import sqlite3
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
@@ -43,7 +46,27 @@ DISK_THRESHOLD_PCT = int(os.environ.get("DAILY_DISK_ALERT_PCT", "80"))
 WANTED_PROCESSES = ["ollama", "gateway"]
 SELF_SCRIPT = "lcm_daily_check.py"  # cron script to skip in the staleness audit
 
-app = FastAPI(title="Watchdog status API", version="0.1.0")
+# ---------------- config + state (Phase 3: thresholds, alerts, sources) ------
+
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_JSON = os.path.join(PROJECT_DIR, "watchdog_config.json")
+STATE_DIR = os.path.join(PROJECT_DIR, "state")
+ALERTS_JSON = os.path.join(STATE_DIR, "alerts.json")
+SOURCES_JSON = os.path.join(STATE_DIR, "sources.json")
+
+DEFAULT_CONFIG = {
+    "thresholds": {
+        "disk_pct": int(os.environ.get("DAILY_DISK_ALERT_PCT", "80")),
+        "backlog_s": 6 * 3600,
+    },
+    "alerts": {"max_kept": 50},
+    "sources": [],
+}
+
+# user-agent for RSS / GitHub fetches (GitHub API requires a UA)
+UA = "watchdog/0.2 (+tailscale-only)"
+
+app = FastAPI(title="Watchdog status API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -66,6 +89,40 @@ def _run(cmd, timeout=60):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def load_config() -> dict:
+    """Config with defaults; re-read per request so edits hot-reload."""
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy of defaults
+    try:
+        with open(CONFIG_JSON) as f:
+            user = json.load(f)
+        for k, v in user.items():
+            if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+                cfg[k].update(v)
+            else:
+                cfg[k] = v
+    except Exception:
+        pass  # missing/broken config -> defaults
+    return cfg
+
+
+def _read_json(path: str, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _write_json_atomic(path: str, data) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 # ---------------- LCM (shells out to the shared health script) ----------------
@@ -101,10 +158,11 @@ def check_lcm() -> dict:
         max_msg = cur.execute("SELECT MAX(timestamp) FROM messages").fetchone()[0]
         max_sum = cur.execute("SELECT MAX(latest_at) FROM summary_nodes").fetchone()[0]
         backlog_s = max(0, int((max_msg or 0) - (max_sum or 0)))
-        if backlog_s > 6 * 3600:
+        backlog_thr = load_config()["thresholds"]["backlog_s"]
+        if backlog_s > backlog_thr:
             state = "degraded"
         details.append({
-            "status": "ok" if backlog_s <= 6 * 3600 else "degraded",
+            "status": "ok" if backlog_s <= backlog_thr else "degraded",
             "label": "summary backlog",
             "detail": _human_duration(backlog_s),
         })
@@ -129,6 +187,7 @@ def _human_duration(s: int) -> str:
 # ---------------- Systems (mirrors lcm_daily_check.py thresholds) -------------
 
 def check_disk() -> dict:
+    thr = load_config()["thresholds"]["disk_pct"]
     rc, out = _run(["df", "-h", "-x", "tmpfs", "-x", "devtmpfs", "-x", "overlay"], timeout=20)
     over, worst = [], 0
     if rc == 0:
@@ -137,14 +196,14 @@ def check_disk() -> dict:
             if len(parts) >= 5 and parts[4].endswith("%"):
                 pct = int(parts[4][:-1])
                 worst = max(worst, pct)
-                if pct >= DISK_THRESHOLD_PCT:
+                if pct >= thr:
                     over.append({"status": "critical", "label": parts[5],
                                  "detail": f"{parts[4]} used of {parts[1]}"})
     else:
         over.append({"status": "critical", "label": "df", "detail": out.strip()[:200]})
     state = "critical" if over else "ok"
     return {"id": "disk", "name": "Disk", "state": state,
-            "summary": f"worst {worst}% (threshold {DISK_THRESHOLD_PCT}%)",
+            "summary": f"worst {worst}% (threshold {thr}%)",
             "details": over}
 
 
@@ -250,6 +309,171 @@ def _cadence_from_expr(expr: str) -> int:
         return 1
 
 
+# ---------------- Alert history (transition tracking) ------------------------
+
+SEV_ORDER = {"ok": 0, "degraded": 1, "critical": 2}
+
+
+def update_alerts(checks: list[dict]) -> list[dict]:
+    """Record check state transitions as alerts (open on worsening, resolve on
+    recovery). First run with no prior state is a silent baseline — pre-existing
+    problems never spam the history. Idempotent: persists prev_checks + alerts
+    to state/alerts.json (atomic write)."""
+    cfg = load_config()
+    max_kept = int(cfg["alerts"]["max_kept"])
+    state = _read_json(ALERTS_JSON, {"prev_checks": None, "alerts": []})
+    prev = state.get("prev_checks") or {}
+    alerts = state.get("alerts") or []
+    by_check = {a["check"]: a for a in alerts if not a.get("resolved_at")}
+
+    for c in checks:
+        cid, cur = c["id"], c["state"]
+        p = prev.get(cid)
+        if p is None:
+            continue  # baseline
+        if p == cur:
+            continue
+        if cur == "ok":
+            a = by_check.get(cid)
+            if a:
+                a["resolved_at"] = _now_iso()
+        elif p == "ok" or SEV_ORDER[cur] > SEV_ORDER.get(p, 0):
+            a = by_check.get(cid)
+            if a is None:
+                alerts.append({
+                    "id": f"{cid}-{time.time_ns()}",
+                    "check": cid,
+                    "name": c["name"],
+                    "severity": cur,
+                    "message": c["summary"],
+                    "opened_at": _now_iso(),
+                    "resolved_at": None,
+                })
+                by_check[cid] = a
+            else:
+                a["severity"] = cur
+                a["message"] = c["summary"]
+
+    # active (unresolved) alerts always sort above resolved; within a group,
+    # newest first
+    alerts.sort(key=lambda a: (
+        0 if a.get("resolved_at") else 1,
+        a.get("resolved_at") or a.get("opened_at") or "",
+    ), reverse=True)
+    if len(alerts) > max_kept:
+        alerts = alerts[:max_kept]
+    _write_json_atomic(ALERTS_JSON, {
+        "prev_checks": {c["id"]: c["state"] for c in checks},
+        "alerts": alerts,
+    })
+    return alerts
+
+
+# ---------------- Watched sources (RSS + GitHub, watermark cursors) -----------
+
+def _fetch(url: str, timeout: int = 10):
+    req = urllib.request.Request(url, headers={
+        "User-Agent": UA,
+        "Accept": "application/rss+xml, application/atom+xml, application/json, */*",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.status, r.read().decode("utf-8", "replace"), dict(r.headers)
+
+
+def _rss_items(body: str) -> list[str]:
+    """First N item ids (guid > link > title) from RSS 2.0 or Atom."""
+    root = ET.fromstring(body)
+    ns = ""
+    if root.tag.startswith("{"):
+        ns = root.tag.split("}")[0] + "}"
+    items = root.findall(f".//{ns}item")
+    if not items:
+        items = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+        ns = "{http://www.w3.org/2005/Atom}"
+    out = []
+    for it in items[:50]:
+        guid = it.find(f"{ns}guid")
+        key = guid.text if guid is not None else None
+        if not key:
+            link = it.find(f"{ns}link")
+            key = link.text if link is not None else None
+        if not key:
+            title = it.find(f"{ns}title")
+            key = (title.text if title is not None else "") or ""
+        out.append(key)
+    return out
+
+
+def _fmt_epoch(ts) -> str:
+    try:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%H:%M UTC")
+    except Exception:
+        return "soon"
+
+
+def check_sources() -> dict:
+    """Poll each configured source, track a watermark cursor per source in
+    state/sources.json, and report new-item counts. Failures degrade that
+    source only (informational, never flips the overall chip)."""
+    cfg = load_config()
+    st = _read_json(SOURCES_JSON, {})
+    sources = []
+    for src in cfg["sources"]:
+        sid = src["id"]
+        prev = st.get(sid, {})
+        entry = {
+            "id": sid, "name": src["name"], "kind": src["kind"],
+            "status": "ok", "new_count": 0,
+            "watermark": prev.get("watermark"),
+            "detail": None, "checked_at": _now_iso(),
+        }
+        try:
+            if src["kind"] == "rss":
+                _, body, _ = _fetch(src["url"])
+                items = _rss_items(body)
+                if not items:
+                    raise ValueError("empty feed")
+                wm = entry["watermark"]
+                if wm is None:
+                    entry["watermark"] = items[0]
+                elif wm in items:
+                    entry["new_count"] = items.index(wm)
+                else:
+                    # watermark rolled off the feed; count what's visible once,
+                    # then advance so we don't re-count the same items forever
+                    entry["new_count"] = len(items)
+                    entry["watermark"] = items[0]
+            elif src["kind"] == "github":
+                _, body, _ = _fetch(
+                    f"https://api.github.com/repos/{src['repo']}/{src.get('ref') or 'releases/latest'}"
+                )
+                data = json.loads(body)
+                cur = data.get("tag_name") or data.get("name") or str(data.get("id", ""))
+                wm = entry["watermark"]
+                if wm is None:
+                    entry["watermark"] = cur
+                elif cur != wm:
+                    entry["new_count"] = 1
+                    entry["watermark"] = cur
+        except urllib.error.HTTPError as exc:
+            entry["status"] = "degraded"
+            if exc.code == 403 and exc.headers.get("X-RateLimit-Remaining") == "0":
+                entry["detail"] = (
+                    "GitHub API rate limited (resets "
+                    f"{_fmt_epoch(exc.headers.get('X-RateLimit-Reset'))})"
+                )
+            else:
+                entry["detail"] = f"HTTP {exc.code} {exc.reason}"
+        except Exception as exc:
+            entry["status"] = "degraded"
+            entry["detail"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        sources.append(entry)
+        st[sid] = {"watermark": entry["watermark"], "status": entry["status"],
+                   "detail": entry["detail"]}
+    _write_json_atomic(SOURCES_JSON, st)
+    return {"generated_at": _now_iso(), "sources": sources}
+
+
 # ---------------- Aggregation + endpoints ------------------------------------
 
 def run_all() -> dict:
@@ -285,14 +509,36 @@ def health() -> dict:
 
 @app.get("/status")
 def status() -> dict:
-    return run_all()
+    data = run_all()
+    data["alerts"] = update_alerts(data["checks"])
+    return data
+
+
+@app.get("/alerts")
+def alerts() -> dict:
+    st = _read_json(ALERTS_JSON, {"alerts": []})
+    return {"generated_at": _now_iso(), "alerts": st.get("alerts", [])}
+
+
+@app.get("/sources")
+def sources() -> dict:
+    return check_sources()
+
+
+@app.get("/config")
+def config() -> dict:
+    cfg = load_config()
+    return {"thresholds": cfg["thresholds"], "alerts": cfg["alerts"],
+            "sources": cfg["sources"]}
 
 
 @app.post("/run-check")
 def run_check(_body: RunCheckRequest | None = None) -> dict:
     # v1: always re-runs everything; the body exists so the client's intent is
     # explicit and the endpoint is forward-compatible with per-check runs.
-    return run_all()
+    data = run_all()
+    data["alerts"] = update_alerts(data["checks"])
+    return data
 
 
 if __name__ == "__main__":

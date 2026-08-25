@@ -34,6 +34,7 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 const ID = 'watchdog'
 const API_BASE = 'http://127.0.0.1:8766'
 const STATUS_KEY = ['watchdog-status']
+const SOURCES_KEY = ['watchdog-sources']
 
 const TONE = { ok: 'good', degraded: 'warn', critical: 'bad' }
 const LABEL = { ok: 'all quiet', degraded: 'degraded', critical: 'problems' }
@@ -85,6 +86,19 @@ function useRunCheck() {
       return res.json()
     },
     onSuccess: data => qc.setQueryData(STATUS_KEY, data)
+  })
+}
+
+function useSources() {
+  return useQuery({
+    queryKey: SOURCES_KEY,
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/sources`, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`watchdog api ${res.status}`)
+      return res.json()
+    },
+    refetchInterval: 300_000,
+    staleTime: 120_000
   })
 }
 
@@ -163,9 +177,81 @@ function StatChip({ tone, children }) {
   })
 }
 
+function SourceRow({ src }) {
+  const tone = src.status === 'ok' ? 'good' : 'warn'
+  const val = src.status !== 'ok'
+    ? 'failed'
+    : (src.new_count > 0 ? `${src.new_count} new` : 'up to date')
+  return jsxs('div', {
+    className: 'border-b border-(--ui-stroke-secondary) py-1.5 last:border-b-0',
+    children: [
+      jsxs('div', {
+        className: 'flex items-baseline gap-2',
+        children: [
+          jsx(StatusDot, { tone, className: 'mt-0.5 shrink-0' }),
+          jsx('span', { className: 'font-medium', children: src.name }),
+          jsx('span', {
+            className: 'rounded-full border border-(--ui-stroke-secondary) px-1.5 py-px font-mono text-[0.625rem] uppercase text-(--ui-text-tertiary)',
+            children: src.kind
+          }),
+          jsx('span', { className: 'ml-auto shrink-0 text-(--ui-text-secondary)', children: val }),
+          jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-quaternary)', children: relTime(src.checked_at) })
+        ]
+      }),
+      src.status !== 'ok' && jsx('div', {
+        className: 'mt-1 pl-[1.1rem] font-mono text-[0.6875rem] text-(--ui-text-tertiary)',
+        children: src.detail
+      })
+    ]
+  })
+}
+
+function AlertRow({ a }) {
+  const resolved = !!a.resolved_at
+  return jsxs('div', {
+    className: 'flex items-center gap-2 border-b border-(--ui-stroke-secondary) py-1.5 last:border-b-0',
+    children: [
+      jsx('span', {
+        className: 'shrink-0 font-mono text-[0.6875rem] text-(--ui-text-quaternary)',
+        children: relTime(a.opened_at)
+      }),
+      jsx('span', {
+        className: cn(
+          'shrink-0 rounded-full px-1.5 py-px text-[0.625rem] font-bold uppercase tracking-wide',
+          resolved
+            ? 'bg-(--ui-stroke-secondary) text-(--ui-text-tertiary)'
+            : 'bg-amber-500/20 text-amber-500'
+        ),
+        children: resolved ? 'resolved' : 'active'
+      }),
+      jsx('span', {
+        className: 'truncate text-(--ui-text-secondary)',
+        children: `${a.name}: ${a.message}`
+      })
+    ]
+  })
+}
+
+function SectionCard({ title, count, children }) {
+  return jsxs('div', {
+    className: 'rounded-lg border border-(--ui-stroke-secondary) p-2',
+    children: [
+      jsxs('div', {
+        className: 'mb-1 flex items-baseline justify-between gap-2 px-1',
+        children: [
+          jsx('span', { className: 'text-[0.6875rem] font-semibold uppercase tracking-wide text-(--ui-text-tertiary)', children: title }),
+          jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: count })
+        ]
+      }),
+      children
+    ]
+  })
+}
+
 function WatchdogPage() {
   const { data, isError, isFetching, refetch } = useStatus()
   const runCheck = useRunCheck()
+  const sourcesQ = useSources()
 
   if (isError) {
     return jsxs('div', {
@@ -240,6 +326,30 @@ function WatchdogPage() {
         className: 'flex flex-col',
         children: (data.checks || []).map(c => jsx(CheckRow, { check: c }, c.id))
       }),
+      // Watched sources
+      jsx(SectionCard, {
+        title: 'Watched sources',
+        count: sourcesQ.isError
+          ? 'unavailable'
+          : (() => {
+              const bad = (sourcesQ.data?.sources || []).filter(s => s.status !== 'ok').length
+              const total = (sourcesQ.data?.sources || []).length
+              return bad ? `${bad} of ${total} need attention` : `${total}/${total} up to date`
+            })(),
+        children: sourcesQ.isError
+          ? jsx('div', { className: 'px-1 py-1 text-[0.75rem] text-(--ui-text-tertiary)', children: 'Source check unavailable (backend down?).' })
+          : (!sourcesQ.data
+              ? jsx('div', { className: 'px-1 py-1 text-[0.75rem] text-(--ui-text-tertiary)', children: 'Loading…' })
+              : jsx('div', { className: 'flex flex-col', children: sourcesQ.data.sources.map(s => jsx(SourceRow, { src: s }, s.id)) }))
+      }),
+      // Alert history
+      jsx(SectionCard, {
+        title: 'Alert history',
+        count: `${(data.alerts || []).length} shown`,
+        children: (data.alerts || []).length === 0
+          ? jsx('div', { className: 'px-1 py-1 text-[0.75rem] text-(--ui-text-tertiary)', children: 'No alerts since the watchdog started tracking.' })
+          : jsx('div', { className: 'flex flex-col', children: (data.alerts || []).map(a => jsx(AlertRow, { a }, a.id)) })
+      }),
       // Stat strip
       jsxs('div', {
         className: 'mt-auto flex flex-wrap gap-1.5 pt-2',
@@ -259,7 +369,7 @@ function WatchdogPage() {
 const plugin = {
   id: ID,
   name: 'Watchdog',
-  description: 'System + LCM watchdog pane — statusbar chip, live checks, run-on-demand.',
+  description: 'System + LCM watchdog — statusbar chip, live checks, watched sources, alert history.',
   register(ctx) {
     ctx.registerMany([
       {
@@ -300,6 +410,7 @@ const plugin = {
           run: () => {
             haptic('tap')
             queryClient.invalidateQueries({ queryKey: STATUS_KEY })
+            queryClient.invalidateQueries({ queryKey: SOURCES_KEY })
           }
         }
       }
