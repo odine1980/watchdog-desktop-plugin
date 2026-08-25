@@ -1,16 +1,20 @@
 # Watchdog
 
-A statusbar chip + `/watchdog` pane for the [Hermes Agent](https://hermes-agent.nousresearch.com) desktop app — a visibility layer for your Hermes host's health, backed by a small read-only FastAPI service.
+A statusbar chip + `/watchdog` **plugin** pane for the [Hermes Agent](https://hermes-agent.nousresearch.com) desktop app — a visibility layer for your Hermes host's health, backed by a small read-only FastAPI status service (the plugin's own backend — not the Hermes gateway, not the Hermes web dashboard, not the API server).
 
 ## What it is
 
 | Piece | What it does |
 |---|---|
 | **Statusbar chip** | Green "all quiet" / amber "degraded" / red "N problems" — one glance, no noise |
-| **`/watchdog` pane** | Live checks, **watched sources** (RSS feeds + a GitHub repo with new-item counts), and an **alert history** (transition log: opens on worsening, resolves on recovery) |
-| **FastAPI backend** | Read-only `/health`, `/status`, `/alerts`, `/sources`, `/config`, `/run-check` |
+| **`/watchdog` plugin pane** | Live checks, **watched sources** (RSS feeds + a GitHub repo with new-item counts), and an **alert history** (transition log: opens on worsening, resolves on recovery) |
+| **FastAPI backend** | The plugin's own read-only status service — NOT the Hermes gateway (`hermes gateway`), NOT the Hermes web dashboard (`hermes dashboard`, 9119), and NOT the OpenAI-compatible API server (8642). Endpoints: `/health`, `/status`, `/alerts`, `/sources`, `/config`, `/run-check` |
 
-**Design principle: one source of truth.** The API shells out to the SAME check scripts the daily cron watchdog uses (`~/.hermes/scripts/lcm_daily_check.py` + `lcm_health_check.py`), so the pane and the cron always agree. The cron stays the alerting layer (silent-unless-broken); this plugin is the visibility layer (on-demand, in-app).
+**Design principle: one source of truth.** The backend shells out to the SAME check scripts the daily cron watchdog uses (`~/.hermes/scripts/lcm_daily_check.py` + `lcm_health_check.py`), so the pane and the cron always agree. The cron stays the alerting layer (silent-unless-broken); this plugin is the visibility layer (on-demand, in-app).
+
+## Screenshot
+
+![Watchdog pane — degraded state](docs/watchdog-pane.png)
 
 ## Layout
 
@@ -23,6 +27,7 @@ state/                     runtime state, gitignored: alerts.json (transition
 desktop-plugin/            plugin.js — the desktop plugin (copy to
                            ~/.hermes/desktop-plugins/watchdog/)
 docs/mockup.html           approved mockup
+docs/watchdog-pane.png     screenshot of the pane (degraded state)
 ```
 
 ## Requirements
@@ -31,7 +36,7 @@ docs/mockup.html           approved mockup
 - A Hermes Agent install (the desktop app + `~/.hermes` layout)
 - Hermes-LCM (for the LCM embedding-health check) — the check degrades gracefully if its script is absent
 
-## Running the API
+## Running the backend
 
 ```bash
 git clone <this-repo> && cd watchdog
@@ -71,7 +76,7 @@ Configured in `watchdog_config.json` → `sources[]`. Each source keeps a waterm
 ## Plugin install
 
 1. Copy `desktop-plugin/plugin.js` to `~/.hermes/desktop-plugins/watchdog/plugin.js` (folder name == plugin id).
-2. Set `API_BASE` at the top of `plugin.js` to your API (`http://127.0.0.1:8766` if Hermes runs on this machine, or your Tailscale/LAN IP for a remote host).
+2. Set `WATCHDOG_BACKEND_URL` at the top of `plugin.js` to your backend — the plugin's own FastAPI status service (`http://127.0.0.1:8766` if Hermes runs on this machine, or your Tailscale/LAN IP for a remote host). This is **not** the Hermes gateway, **not** the Hermes web dashboard, and **not** the OpenAI-compatible API server.
 3. In the desktop app: **⌘K → Reload desktop plugins** (hot-reload usually picks it up).
 
 ## License

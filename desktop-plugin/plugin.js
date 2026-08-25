@@ -1,11 +1,19 @@
 /**
  * Watchdog — statusbar chip + watchdog pane for the Hermes desktop app.
  *
- * Backend: a standalone FastAPI service on the Hermes host
- *   http://127.0.0.1:8766   (default; override WATCHDOG_API_BASE / edit below)
+ * Backend: the watchdog's own small FastAPI status service on the Hermes
+ * host. It is NOT the Hermes gateway (`hermes gateway`), NOT the Hermes web
+ * dashboard (`hermes dashboard`, the 9119 remote backend the desktop app
+ * dials), and NOT the OpenAI-compatible API server (8642).
+ *   http://127.0.0.1:8766   (default; override WATCHDOG_BACKEND_URL / edit below)
  * The service shells out to the SAME check scripts the daily cron watchdog
  * uses (~/.hermes/scripts/lcm_daily_check.py + lcm_health_check.py), so this
  * pane and the cron always agree — one source of truth.
+ *
+ * Actions (LCM compact/backup) are NOT sent through the FastAPI backend: they
+ * ride the gateway's own prompt.submit RPC so /lcm commands execute in-process
+ * inside the engine that owns lcm.db — never a second process writing the DB
+ * (WAL corruption vector). One click = the same command you would type.
  *
  * Plain ESM, loaded uncompiled — UI is jsx() calls, not JSX syntax.
  * Only these imports resolve: @hermes/plugin-sdk, react, react/jsx-runtime.
@@ -30,13 +38,23 @@ import {
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'watchdog'
-// Point this at your watchdog API.
+// Point this at the watchdog backend — the plugin's own small FastAPI status
+// service that powers this pane. It is NOT the Hermes gateway (`hermes
+// gateway`), NOT the Hermes web dashboard (`hermes dashboard`, the 9119
+// remote backend the desktop app dials), and NOT the OpenAI-compatible API
+// server (8642). It's just the watchdog's status service.
 //   - Hermes on this machine:        http://127.0.0.1:8766  (default)
 //   - Remote Hermes host (Tailscale): http://<tailscale-ip>:8766
 //   - Remote Hermes host (LAN):       http://<lan-ip>:8766
-const API_BASE = 'http://127.0.0.1:8766'
+const WATCHDOG_BACKEND_URL = 'http://127.0.0.1:8766'
 const STATUS_KEY = ['watchdog-status']
 const SOURCES_KEY = ['watchdog-sources']
+const SESSION_KEY = ['watchdog-session']
+
+// Matches the app's own prompt.submit ack ceiling (agent.gateway_timeout =
+// 1800s): a rotate can take minutes; the 30s default gateway timeout would
+// surface a false failure while the turn is still running.
+const PROMPT_SUBMIT_TIMEOUT_MS = 1_800_000
 
 const TONE = { ok: 'good', degraded: 'warn', critical: 'bad' }
 const LABEL = { ok: 'all quiet', degraded: 'degraded', critical: 'problems' }
@@ -66,7 +84,7 @@ function useStatus() {
   return useQuery({
     queryKey: STATUS_KEY,
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/status`, { cache: 'no-store' })
+      const res = await fetch(`${WATCHDOG_BACKEND_URL}/status`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`watchdog api ${res.status}`)
       return res.json()
     },
@@ -79,7 +97,7 @@ function useRunCheck() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch(`${API_BASE}/run-check`, {
+      const res = await fetch(`${WATCHDOG_BACKEND_URL}/run-check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ check: 'all' })
@@ -95,12 +113,53 @@ function useSources() {
   return useQuery({
     queryKey: SOURCES_KEY,
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/sources`, { cache: 'no-store' })
+      const res = await fetch(`${WATCHDOG_BACKEND_URL}/sources`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`watchdog api ${res.status}`)
       return res.json()
     },
     refetchInterval: 300_000,
     staleTime: 120_000
+  })
+}
+
+/** Live session list straight from the gateway (read-only RPC) — used to show
+ *  the active session's real message count without touching the backend. */
+function useSessionInfo() {
+  return useQuery({
+    queryKey: SESSION_KEY,
+    queryFn: async () => host.request('session.active_list', {
+      current_session_id: host.state.activeSessionId.get() || ''
+    }),
+    refetchInterval: 60_000,
+    staleTime: 30_000
+  })
+}
+
+/** Shared LCM action: inject a /lcm command into the ACTIVE session via the
+ *  gateway's prompt.submit RPC (same path as typing it — in-process, safe).
+ *  display_kind 'hidden' keeps the injected user row out of the transcript;
+ *  the /lcm command's output still streams back as a normal assistant turn. */
+async function runLcmCommand(command) {
+  const sid = host.state.activeSessionId.get()
+  if (!sid) throw new Error('no active session')
+  const gw = host.getGateway()
+  if (!gw) throw new Error('gateway unavailable')
+  const res = await gw.request('prompt.submit', {
+    session_id: sid,
+    text: command,
+    display_kind: 'hidden'
+  }, PROMPT_SUBMIT_TIMEOUT_MS)
+  queryClient.invalidateQueries({ queryKey: SESSION_KEY })
+  return res
+}
+
+function useLcmAction(command) {
+  return useMutation({
+    mutationFn: () => runLcmCommand(command),
+    onSuccess: () => {
+      haptic('tap')
+      queryClient.invalidateQueries({ queryKey: SESSION_KEY })
+    }
   })
 }
 
@@ -250,10 +309,48 @@ function SectionCard({ title, count, children }) {
   })
 }
 
+/** LCM action row: one-click compact / backup into the active session. */
+function LcmActionRow({ label, command, hint, kind }) {
+  const action = useLcmAction(command)
+  const busy = action.isPending
+
+  return jsxs('div', {
+    className: 'flex items-center gap-2 py-1',
+    children: [
+      jsx('button', {
+        className: cn(
+          'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs',
+          kind === 'primary'
+            ? 'border-(--ui-accent)/40 bg-(--ui-accent)/10 text-(--ui-accent) hover:bg-(--ui-accent)/20'
+            : 'border-(--ui-stroke-secondary) hover:bg-(--chrome-action-hover)',
+          'disabled:opacity-60'
+        ),
+        type: 'button',
+        disabled: busy,
+        onClick: () => action.mutate(),
+        children: jsxs('span', {
+          className: 'inline-flex items-center gap-1',
+          children: [
+            jsx(Codicon, { name: busy ? 'sync' : (kind === 'primary' ? 'zap' : 'save'), size: '0.75rem', className: busy ? 'animate-spin' : undefined }),
+            jsx('span', { children: busy ? 'Working…' : label })
+          ]
+        })
+      }),
+      jsx('span', {
+        className: 'min-w-0 flex-1 truncate text-[0.6875rem] text-(--ui-text-tertiary)',
+        children: action.isError
+          ? `failed: ${action.error.message || 'unknown'}`
+          : (action.isSuccess ? 'sent — output lands in chat' : hint)
+      })
+    ]
+  })
+}
+
 function WatchdogPage() {
   const { data, isError, isFetching, refetch } = useStatus()
   const runCheck = useRunCheck()
   const sourcesQ = useSources()
+  const sessionQ = useSessionInfo()
 
   if (isError) {
     return jsxs('div', {
@@ -262,7 +359,7 @@ function WatchdogPage() {
         jsx('div', { className: 'font-medium', children: 'Watchdog backend unreachable' }),
         jsx('div', {
           className: 'font-mono text-[0.75rem] text-(--ui-text-tertiary)',
-          children: `${API_BASE} — is the status service running? (uvicorn watchdog_api:app --host 0.0.0.0 --port 8766)`
+          children: `${WATCHDOG_BACKEND_URL} — is the status service running? (uvicorn watchdog_api:app --host 0.0.0.0 --port 8766)`
         }),
         jsx('button', {
           className: cn(
@@ -283,6 +380,8 @@ function WatchdogPage() {
 
   const { tone, label } = chipState(data, false)
   const stats = data.stats || {}
+  const activeSessions = (sessionQ.data?.sessions || []).filter(s => s.current)
+  const active = activeSessions[0] || null
 
   return jsxs('div', {
     className: 'flex h-full flex-col gap-3 p-3 text-sm',
@@ -328,6 +427,30 @@ function WatchdogPage() {
         className: 'flex flex-col',
         children: (data.checks || []).map(c => jsx(CheckRow, { check: c }, c.id))
       }),
+      // LCM actions — one-click compact/backup, agent-mediated via the gateway
+      jsx(SectionCard, {
+        title: 'LCM actions',
+        count: active
+          ? `${active.message_count ?? '?'} msgs · ${String(active.id || '').slice(-8)}`
+          : (sessionQ.isError ? 'gateway unreachable' : 'no active session'),
+        children: jsxs('div', {
+          className: 'flex flex-col',
+          children: [
+            jsx(LcmActionRow, {
+              label: 'Compact now',
+              command: '/lcm rotate apply',
+              hint: 'Compacts this session in place (backup-first, tail-preserving). May take minutes — output lands in chat.',
+              kind: 'primary'
+            }),
+            jsx(LcmActionRow, {
+              label: 'Backup first',
+              command: '/lcm backup',
+              hint: 'Timestamped SQLite snapshot before any cleanup.',
+              kind: 'secondary'
+            })
+          ]
+        })
+      }),
       // Watched sources
       jsx(SectionCard, {
         title: 'Watched sources',
@@ -371,7 +494,7 @@ function WatchdogPage() {
 const plugin = {
   id: ID,
   name: 'Watchdog',
-  description: 'System + LCM watchdog — statusbar chip, live checks, watched sources, alert history.',
+  description: 'System + LCM watchdog — statusbar chip, live checks, watched sources, alert history, one-click LCM compact/backup.',
   register(ctx) {
     ctx.registerMany([
       {
@@ -413,6 +536,36 @@ const plugin = {
             haptic('tap')
             queryClient.invalidateQueries({ queryKey: STATUS_KEY })
             queryClient.invalidateQueries({ queryKey: SOURCES_KEY })
+          }
+        }
+      },
+      {
+        id: 'compact-lcm',
+        area: PALETTE_AREA,
+        data: {
+          id: 'watchdog.compactLcm',
+          label: 'Watchdog: Compact LCM now',
+          keywords: ['watchdog', 'lcm', 'compact', 'rotate', 'cleanup', 'context'],
+          run: () => {
+            haptic('tap')
+            runLcmCommand('/lcm rotate apply').catch(err => {
+              console.error('[watchdog] compact lcm failed', err)
+            })
+          }
+        }
+      },
+      {
+        id: 'backup-lcm',
+        area: PALETTE_AREA,
+        data: {
+          id: 'watchdog.backupLcm',
+          label: 'Watchdog: Backup LCM',
+          keywords: ['watchdog', 'lcm', 'backup', 'snapshot'],
+          run: () => {
+            haptic('tap')
+            runLcmCommand('/lcm backup').catch(err => {
+              console.error('[watchdog] backup lcm failed', err)
+            })
           }
         }
       }
