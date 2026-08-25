@@ -1,0 +1,59 @@
+# Watchdog
+
+Hermes desktop plugin — system + LCM watchdog visibility layer.
+
+## What it is
+
+A statusbar chip (green "all quiet" / amber "degraded" / red "N problems") plus
+a `/watchdog` pane in the Hermes desktop app, backed by a small read-only
+FastAPI service on the Hermes host.
+
+**Design principle: one source of truth.** The API shells out to the SAME
+check scripts the daily cron watchdog uses
+(`~/.hermes/scripts/lcm_daily_check.py` + `lcm_health_check.py`), so the pane
+and the cron always agree. The cron stays the alerting layer (Discord,
+silent-unless-broken); this plugin is the visibility layer (on-demand, in-app).
+
+## Layout
+
+```
+watchdog_api.py        FastAPI service: /health, /status, /run-check
+desktop-plugin/        plugin.js — copy of the installed desktop plugin
+docs/mockup.html       approved mockup
+```
+
+## Running the API
+
+```bash
+cd ~/workspace/watchdog
+uv venv .venv && uv pip install --python .venv/bin/python fastapi "uvicorn[standard]"
+.venv/bin/python -m uvicorn watchdog_api:app --host 127.0.0.1 --port 8766
+```
+
+Bound to the Tailscale IP only — never 0.0.0.0. Read-only by design
+(`/run-check` only re-runs checks). CORS is open because the desktop app
+renderer fetches cross-origin; the surface is Tailscale-only. Add a token
+before ever exposing it wider.
+
+## Checks surfaced
+
+| id | check | source |
+|---|---|---|
+| lcm | embedding health (coverage, provider, last embed) + db integrity + summary backlog | `lcm_health_check.py` + direct `lcm.db` reads |
+| disk | worst usage vs 80% threshold | `df` |
+| mem | free + loadavg (informational) | `free`, `/proc/loadavg` |
+| processes | ollama, gateway running | `pgrep` |
+| cron | jobs.json audit: failures + staleness per cadence | `~/.hermes/cron/jobs.json` |
+
+## Plugin install
+
+`plugin.js` lives at `~/.hermes/desktop-plugins/watchdog/plugin.js` (folder
+name == plugin id). The desktop app hot-reloads it; if it doesn't appear,
+run **⌘K → Reload desktop plugins**. If the Hermes VM's Tailscale IP changes,
+update `API_BASE` at the top of `plugin.js`.
+
+## Roadmap (not started)
+
+- Alert history (last N alerts from the cron's state)
+- Configurable thresholds via plugin storage
+- Watched sources card (RSS/GitHub polling per the mockup)

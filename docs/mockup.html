@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Watchdog Pane — Mockup</title>
+<style>
+  :root {
+    --bg: #17181c;
+    --surface: #1f2026;
+    --surface2: #26272e;
+    --stroke: #33343c;
+    --text: #e6e7eb;
+    --text2: #9b9da8;
+    --text3: #6b6d78;
+    --accent: #8b7cf6;
+    --ok: #4cc38a;
+    --ok-dim: rgba(76, 195, 138, .14);
+    --warn: #e0b341;
+    --warn-dim: rgba(224, 179, 65, .13);
+    --crit: #f0645c;
+    --crit-dim: rgba(240, 100, 92, .13);
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .pane {
+    max-width: 760px;
+    padding: 18px 20px 28px;
+  }
+
+  /* ---------- header ---------- */
+  .hdr { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .hdr .title { font-size: 15px; font-weight: 650; letter-spacing: .1px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 10px; border-radius: 999px;
+    border: 1px solid var(--stroke);
+    background: var(--surface);
+    font-size: 11.5px; color: var(--text2);
+    cursor: default; user-select: none;
+  }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .chip.ok .dot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .chip.ok { color: var(--ok); border-color: rgba(76,195,138,.35); background: var(--ok-dim); }
+  .chip.warn .dot { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+  .chip.warn { color: var(--warn); border-color: rgba(224,179,65,.35); background: var(--warn-dim); }
+  .chip.crit .dot { background: var(--crit); box-shadow: 0 0 6px var(--crit); }
+  .chip.crit { color: var(--crit); border-color: rgba(240,100,92,.35); background: var(--crit-dim); }
+  .spacer { flex: 1; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: 6px;
+    border: 1px solid var(--stroke);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 12px; font-weight: 550;
+    cursor: pointer; user-select: none;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn .spin { display: none; }
+  .btn.running .spin { display: inline-block; animation: rot 1s linear infinite; }
+  .btn.running .lbl { opacity: .7; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  .meta { font-size: 11.5px; color: var(--text3); margin: -6px 0 14px; }
+
+  /* ---------- segmented control ---------- */
+  .seg { display: inline-flex; border: 1px solid var(--stroke); border-radius: 7px; overflow: hidden; margin-bottom: 16px; }
+  .seg button {
+    border: 0; background: transparent; color: var(--text2);
+    padding: 4px 14px; font-size: 12px; cursor: pointer;
+    border-right: 1px solid var(--stroke);
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--surface2); color: var(--text); font-weight: 600; }
+
+  /* ---------- stat strip ---------- */
+  .strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 8px; margin-bottom: 16px;
+  }
+  .stat {
+    background: var(--surface); border: 1px solid var(--stroke); border-radius: 8px;
+    padding: 8px 11px;
+  }
+  .stat .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--text3); }
+  .stat .v { font-size: 14px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .stat .v.ok { color: var(--ok); }
+  .stat .v.warn { color: var(--warn); }
+  .stat .v.crit { color: var(--crit); }
+  .stat .v.plain { color: var(--text); }
+  .stat .sub { font-size: 10.5px; color: var(--text3); margin-top: 1px; }
+
+  /* ---------- section cards ---------- */
+  .card {
+    background: var(--surface); border: 1px solid var(--stroke); border-radius: 10px;
+    margin-bottom: 14px; overflow: hidden;
+  }
+  .card .card-h {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 13px; border-bottom: 1px solid var(--stroke);
+    font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .7px; color: var(--text3);
+  }
+  .card .card-h .count { margin-left: auto; font-weight: 500; letter-spacing: 0; }
+  .row {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 8px 13px; border-bottom: 1px solid var(--stroke);
+    cursor: pointer;
+  }
+  .row:last-child { border-bottom: 0; }
+  .row:hover { background: rgba(255,255,255,.02); }
+  .row .ico { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; align-self: center; }
+  .row.ok .ico { background: var(--ok); }
+  .row.warn .ico { background: var(--warn); }
+  .row.crit .ico { background: var(--crit); }
+  .row .name { font-weight: 550; }
+  .src {
+    flex: 0 0 auto; font-size: 9.5px; font-weight: 700; letter-spacing: .5px;
+    padding: 1px 6px; border-radius: 4px; text-transform: uppercase;
+    background: var(--surface2); border: 1px solid var(--stroke); color: var(--text3);
+  }
+  .src.github { color: var(--accent); border-color: rgba(139,124,246,.4); }
+  .row .val { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--text2); font-variant-numeric: tabular-nums; }
+  .row.warn .val { color: var(--warn); }
+  .row.crit .val { color: var(--crit); }
+  .row .chev { color: var(--text3); font-size: 10px; transition: transform .15s; }
+  .row.open .chev { transform: rotate(90deg); }
+  .detail {
+    display: none; padding: 0 13px 10px 31px;
+    font-size: 12px; color: var(--text2);
+    font-family: var(--mono);
+    white-space: pre-wrap;
+  }
+  .row.open + .detail { display: block; }
+
+  /* ---------- alerts ---------- */
+  .alert { display: flex; align-items: center; gap: 10px; padding: 7px 13px; border-bottom: 1px solid var(--stroke); }
+  .alert:last-child { border-bottom: 0; }
+  .alert .time { color: var(--text3); font-family: var(--mono); font-size: 11px; flex: 0 0 auto; }
+  .badge {
+    flex: 0 0 auto; font-size: 10px; font-weight: 700; letter-spacing: .5px;
+    padding: 1px 7px; border-radius: 999px; text-transform: uppercase;
+  }
+  .badge.resolved { color: var(--ok); background: var(--ok-dim); }
+  .badge.active { color: var(--crit); background: var(--crit-dim); }
+  .badge.info { color: var(--text2); background: var(--surface2); }
+  .alert .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---------- footer ---------- */
+  .foot { display: flex; gap: 14px; font-size: 11.5px; color: var(--text3); margin-top: 2px; }
+  .foot .mock { margin-left: auto; border: 1px dashed var(--stroke); border-radius: 6px; padding: 1px 8px; color: var(--text3); }
+</style>
+</head>
+<body>
+<div class="pane">
+
+  <!-- header -->
+  <div class="hdr">
+    <span class="title">Watchdog</span>
+    <span class="chip" id="chip"><span class="dot"></span><span id="chipTxt">All quiet</span></span>
+    <span class="spacer"></span>
+    <button class="btn" id="runBtn"><span class="spin">⟳</span><span class="lbl">Run checks now</span></button>
+  </div>
+  <div class="meta" id="meta">Last full check: 08:58 · 12s · next scheduled 09:00</div>
+
+  <!-- state toggle (mockup only) -->
+  <div class="seg" id="seg">
+    <button data-state="quiet">All quiet</button>
+    <button data-state="degraded" class="on">Degraded</button>
+    <button data-state="critical">Critical</button>
+  </div>
+
+  <!-- stat strip -->
+  <div class="strip" id="strip"></div>
+
+  <!-- checks -->
+  <div class="card">
+    <div class="card-h">Checks <span class="count" id="checkCount"></span></div>
+    <div id="checks"></div>
+  </div>
+
+  <!-- watched sources (feeds + repos) -->
+  <div class="card">
+    <div class="card-h">Watched sources <span class="count" id="srcCount"></span></div>
+    <div id="sources"></div>
+  </div>
+
+  <!-- alert history -->
+  <div class="card">
+    <div class="card-h">Alert history <span class="count" id="alertCount"></span></div>
+    <div id="alerts"></div>
+  </div>
+
+  <div class="foot">
+    <span>Silent unless broken — no push notifications when healthy</span>
+    <span class="mock">DESIGN MOCKUP</span>
+  </div>
+</div>
+
+<script>
+const STATES = {
+  quiet: {
+    chip: ['ok', 'All quiet'],
+    meta: 'Last full check: 08:58 · 12s · next scheduled 09:00',
+    strip: [
+      ['Disk', '72%', 'ok', '/ · 72G/99G'],
+      ['Memory', '5.1G', 'ok', 'of 23G'],
+      ['Load', '0.09', 'ok', '1m avg'],
+      ['Processes', '3/3', 'ok', 'hermes · gateway · ollama'],
+      ['Cron jobs', '4/4', 'ok', 'none stale'],
+      ['Sources', '3/3', 'ok', 'hn · selfhosted · repo'],
+    ],
+    checks: [
+      { s: 'ok', name: 'LCM embedding health', val: 'OK', det: '' },
+      { s: 'ok', name: 'Disk usage', val: '72%', det: '' },
+      { s: 'ok', name: 'Memory', val: '5.1G / 23G', det: '' },
+      { s: 'ok', name: 'Load average', val: '0.09', det: '' },
+      { s: 'ok', name: 'Processes', val: '3/3 up', det: '' },
+      { s: 'ok', name: 'Cron job health', val: '4/4 ok', det: '' },
+    ],
+    sources: [
+      { s: 'ok', name: 'Hacker News', type: 'RSS', val: '3 new · 2m ago', det: 'Top new item: "Show HN: Hermes desktop plugins SDK"\nwatermark: #48213 · next check in 10m' },
+      { s: 'ok', name: 'r/selfhosted', type: 'RSS', val: '1 new · 2m ago', det: 'Top new item: "Proxmox + ZFS best practices, 2026 edition"\nwatermark: #881204 · next check in 10m' },
+      { s: 'ok', name: 'NousResearch/hermes-agent', type: 'GitHub', val: 'no release · 2m ago', det: 'stars 234,153 (+3) · 2 new commits · 0 issues flagged\nlatest: "fix: cron delivery topic targeting (4a1f2c9)"' },
+    ],
+    alerts: [
+      ['Yesterday 09:00', 'resolved', 'Disk crossed 80% — resolved by cleanup (81% → 72%)'],
+      ['Aug 24 09:00', 'resolved', 'LCM degraded (coverage 98%) — self-healed via backfill'],
+      ['Aug 20 09:00', 'info', 'Watchdog switched to silent-unless-broken model'],
+    ],
+  },
+  degraded: {
+    chip: ['warn', '2 problems'],
+    meta: 'Last full check: 08:58 · 12s · next scheduled 09:00',
+    strip: [
+      ['Disk', '87%', 'warn', '/ · 86G/99G'],
+      ['Memory', '5.1G', 'ok', 'of 23G'],
+      ['Load', '0.09', 'ok', '1m avg'],
+      ['Processes', '3/3', 'ok', 'hermes · gateway · ollama'],
+      ['Cron jobs', '3/4', 'warn', '1 stale'],
+      ['Sources', '2/3', 'warn', 'hn timeout'],
+    ],
+    checks: [
+      { s: 'ok', name: 'LCM embedding health', val: 'OK', det: '' },
+      { s: 'warn', name: 'Disk usage', val: '87%', det: '/ is at 87% (86G/99G) — threshold 80%\nSuggest: prune docker images, check ~/.hermes/logs, journalctl --vacuum' },
+      { s: 'ok', name: 'Memory', val: '5.1G / 23G', det: '' },
+      { s: 'ok', name: 'Load average', val: '0.09', det: '' },
+      { s: 'ok', name: 'Processes', val: '3/3 up', det: '' },
+      { s: 'warn', name: 'Cron job health', val: '1 stale', det: 'Weekly review — last ran 8d ago (7d cadence)\nNext scheduled run: Sun 20:00' },
+    ],
+    sources: [
+      { s: 'warn', name: 'Hacker News', type: 'RSS', val: 'FETCH FAILED · 2 retries', det: 'GET https://news.ycombinator.com/rss → timeout after 10s (attempt 3/3)\nLast good check: 09:12 · 14 items seen · watermark #48213' },
+      { s: 'ok', name: 'r/selfhosted', type: 'RSS', val: '1 new · 2m ago', det: 'Top new item: "Proxmox + ZFS best practices, 2026 edition"\nwatermark: #881204 · next check in 10m' },
+      { s: 'warn', name: 'NousResearch/hermes-agent', type: 'GitHub', val: 'release v0.21.1 · 1h ago', det: 'New release: v0.21.1 — "plugin toolset fixes"\n1 issue flagged #watch: "cron delivery_error 403 on discord"\ncommits since last check: 4' },
+    ],
+    alerts: [
+      ['Today 08:58', 'active', 'Hacker News RSS unreachable — timeout after 10s'],
+      ['Today 08:58', 'active', 'Disk usage 87% — above 80% threshold'],
+      ['Yesterday 09:00', 'resolved', 'Disk crossed 80% — resolved by cleanup (81% → 72%)'],
+      ['Aug 24 09:00', 'resolved', 'LCM degraded (coverage 98%) — self-healed via backfill'],
+    ],
+  },
+  critical: {
+    chip: ['crit', '4 problems'],
+    meta: 'Last full check: 08:58 · 14s · next scheduled 09:00',
+    strip: [
+      ['Disk', '93%', 'crit', '/ · 92G/99G'],
+      ['Memory', '11.2G', 'warn', 'of 23G'],
+      ['Load', '3.4', 'warn', '1m avg'],
+      ['Processes', '2/3', 'crit', 'gateway DOWN'],
+      ['Cron jobs', '2/4', 'crit', '2 failing'],
+      ['Sources', '1/3', 'crit', '2 down'],
+    ],
+    checks: [
+      { s: 'crit', name: 'LCM embedding health', val: 'DEGRADED', det: 'coverage 0/1 — no vectors under active profile\nself-heal attempted 08:58 → STILL DEGRADED\nprovider: voyage / voyage-4-lite (key set)' },
+      { s: 'crit', name: 'Disk usage', val: '93%', det: '/ is at 93% (92G/99G) — threshold 80%\nCleanup did not bring it down. Investigate largest consumers.' },
+      { s: 'warn', name: 'Memory', val: '11.2G / 23G', det: '' },
+      { s: 'warn', name: 'Load average', val: '3.4', det: 'sustained above 2.0 for 15m' },
+      { s: 'crit', name: 'Processes', val: 'gateway DOWN', det: 'pgrep gateway → no match\ncheck: systemctl status hermes-serve · journalctl -u hermes-serve -n 50' },
+      { s: 'crit', name: 'Cron job health', val: '2 failing', det: 'Weekly review — failure_streak=2\nAI tech briefing — last_delivery_error=403' },
+    ],
+    sources: [
+      { s: 'crit', name: 'Hacker News', type: 'RSS', val: 'DOWN · 6 retries', det: 'GET https://news.ycombinator.com/rss → connection refused\nLast good check: Yesterday 21:04 · watermark #48199' },
+      { s: 'crit', name: 'NousResearch/hermes-agent', type: 'GitHub', val: 'API 403 rate_limited', det: 'GET /repos/NousResearch/hermes-agent → 403 rate limit exceeded\nReset at 10:04 UTC · token: ok · 2 issues flagged #watch' },
+      { s: 'warn', name: 'r/selfhosted', type: 'RSS', val: 'FETCH FAILED · 2 retries', det: 'GET https://www.reddit.com/r/selfhosted/.rss → timeout after 10s (attempt 2/3)' },
+    ],
+    alerts: [
+      ['Today 08:58', 'active', 'Gateway process down — hermes-serve unreachable'],
+      ['Today 08:58', 'active', 'Hacker News RSS down — connection refused'],
+      ['Today 08:58', 'active', 'hermes-agent GitHub API rate-limited (403)'],
+      ['Today 08:58', 'active', 'LCM still degraded after self-heal (coverage 0/1)'],
+      ['Today 08:58', 'active', 'Disk usage 93% — critical'],
+      ['Yesterday 09:00', 'resolved', 'Disk crossed 80% — resolved by cleanup (81% → 72%)'],
+    ],
+  },
+};
+
+function render(state) {
+  const s = STATES[state];
+  const [chipCls, chipTxt] = s.chip;
+  const chip = document.getElementById('chip');
+  chip.className = 'chip ' + chipCls;
+  document.getElementById('chipTxt').textContent = chipTxt;
+  document.getElementById('meta').textContent = s.meta;
+
+  // stat strip
+  const strip = document.getElementById('strip');
+  strip.innerHTML = '';
+  for (const [k, v, cls, sub] of s.strip) {
+    const el = document.createElement('div');
+    el.className = 'stat';
+    el.innerHTML = `<div class="k">${k}</div><div class="v ${cls}">${v}</div><div class="sub">${sub}</div>`;
+    strip.appendChild(el);
+  }
+
+  // checks
+  const checks = document.getElementById('checks');
+  checks.innerHTML = '';
+  const nWarn = s.checks.filter(c => c.s === 'warn').length;
+  const nCrit = s.checks.filter(c => c.s === 'crit').length;
+  const nBad = nWarn + nCrit;
+  document.getElementById('checkCount').textContent = nBad ? `${nBad} of ${s.checks.length} need attention` : `${s.checks.length}/${s.checks.length} passing`;
+  s.checks.forEach((c, i) => {
+    const open = c.s !== 'ok' && i === 0 ? ' open' : '';
+    const row = document.createElement('div');
+    row.className = 'row ' + c.s + open;
+    row.innerHTML = `<span class="ico"></span><span class="name">${c.name}</span><span class="val">${c.val}</span><span class="chev">›</span>`;
+    row.addEventListener('click', () => {
+      if (!c.det) return;
+      row.classList.toggle('open');
+    });
+    checks.appendChild(row);
+    if (c.det) {
+      const det = document.createElement('div');
+      det.className = 'detail';
+      det.textContent = c.det;
+      checks.appendChild(det);
+    }
+  });
+
+  // watched sources
+  const sources = document.getElementById('sources');
+  sources.innerHTML = '';
+  const sBad = s.sources.filter(x => x.s !== 'ok').length;
+  document.getElementById('srcCount').textContent = sBad ? `${sBad} of ${s.sources.length} need attention` : `${s.sources.length}/${s.sources.length} up to date`;
+  s.sources.forEach((c, i) => {
+    const open = c.s !== 'ok' && i === 0 ? ' open' : '';
+    const row = document.createElement('div');
+    row.className = 'row ' + c.s + open;
+    row.innerHTML = `<span class="ico"></span><span class="name">${c.name}</span><span class="src ${c.type.toLowerCase()}">${c.type}</span><span class="val">${c.val}</span><span class="chev">›</span>`;
+    row.addEventListener('click', () => {
+      if (!c.det) return;
+      row.classList.toggle('open');
+    });
+    sources.appendChild(row);
+    if (c.det) {
+      const det = document.createElement('div');
+      det.className = 'detail';
+      det.textContent = c.det;
+      sources.appendChild(det);
+    }
+  });
+
+  // alerts
+  const alerts = document.getElementById('alerts');
+  alerts.innerHTML = '';
+  document.getElementById('alertCount').textContent = s.alerts.length + ' shown';
+  for (const [time, kind, msg] of s.alerts) {
+    const el = document.createElement('div');
+    el.className = 'alert';
+    el.innerHTML = `<span class="time">${time}</span><span class="badge ${kind}">${kind}</span><span class="msg">${msg}</span>`;
+    alerts.appendChild(el);
+  }
+}
+
+// segmented control
+document.querySelectorAll('#seg button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#seg button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    render(b.dataset.state);
+  });
+});
+
+// run-now button (mock)
+const runBtn = document.getElementById('runBtn');
+runBtn.addEventListener('click', () => {
+  runBtn.classList.add('running');
+  runBtn.disabled = true;
+  runBtn.querySelector('.lbl').textContent = 'Running checks…';
+  setTimeout(() => {
+    runBtn.classList.remove('running');
+    runBtn.disabled = false;
+    runBtn.querySelector('.lbl').textContent = 'Run checks now';
+    // stay on current state; a real plugin would re-render from fresh JSON
+  }, 1400);
+});
+
+render('degraded');
+</script>
+</body>
+</html>
