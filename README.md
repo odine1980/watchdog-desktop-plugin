@@ -39,7 +39,7 @@ docs/watchdog-pane.png     screenshot of the pane (degraded state)
 ## Running the backend
 
 ```bash
-git clone <this-repo> && cd watchdog
+git clone https://github.com/odine1980/watchdog-desktop-plugin.git watchdog && cd watchdog
 python3 -m venv .venv && .venv/bin/pip install fastapi "uvicorn[standard]"
 .venv/bin/python -m uvicorn watchdog_api:app --host 127.0.0.1 --port 8766
 ```
