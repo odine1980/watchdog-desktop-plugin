@@ -10,10 +10,12 @@
  * uses (~/.hermes/scripts/lcm_daily_check.py + lcm_health_check.py), so this
  * pane and the cron always agree — one source of truth.
  *
- * Actions (LCM compact/backup) are NOT sent through the FastAPI backend: they
- * ride the gateway's own prompt.submit RPC so /lcm commands execute in-process
- * inside the engine that owns lcm.db — never a second process writing the DB
- * (WAL corruption vector). One click = the same command you would type.
+ * Actions (LCM status/doctor/rotate/compact/backup) are NOT sent through the
+ * FastAPI backend: they ride the gateway's own prompt.submit RPC so /lcm
+ * commands execute in-process inside the engine that owns lcm.db — never a
+ * second process writing the DB (WAL corruption vector). One click = the same
+ * command you would type. The LCM actions card and its palette commands only
+ * appear when the backend reports LCM present (lcm.db + health script).
  *
  * Plain ESM, loaded uncompiled — UI is jsx() calls, not JSX syntax.
  * Only these imports resolve: @hermes/plugin-sdk, react, react/jsx-runtime.
@@ -58,6 +60,12 @@ const PROMPT_SUBMIT_TIMEOUT_MS = 1_800_000
 
 const TONE = { ok: 'good', degraded: 'warn', critical: 'bad' }
 const LABEL = { ok: 'all quiet', degraded: 'degraded', critical: 'problems' }
+
+/** True when the backend reports LCM is present (scripts + lcm.db exist). */
+function lcmAvailable(data) {
+  const lcm = (data?.checks || []).find(c => c.id === 'lcm')
+  return lcm ? lcm.available !== false : false
+}
 
 /** Aggregate state → StatusDot tone + chip label. */
 function chipState(data, isError) {
@@ -427,8 +435,9 @@ function WatchdogPage() {
         className: 'flex flex-col',
         children: (data.checks || []).map(c => jsx(CheckRow, { check: c }, c.id))
       }),
-      // LCM actions — one-click compact/backup, agent-mediated via the gateway
-      jsx(SectionCard, {
+      // LCM actions — one-click compact/backup, agent-mediated via the gateway.
+      // Only rendered when the backend reports LCM present (lcm.db + scripts).
+      lcmAvailable(data) && jsx(SectionCard, {
         title: 'LCM actions',
         count: active
           ? `${active.message_count ?? '?'} msgs · ${String(active.id || '').slice(-8)}`
@@ -436,6 +445,24 @@ function WatchdogPage() {
         children: jsxs('div', {
           className: 'flex flex-col',
           children: [
+            jsx(LcmActionRow, {
+              label: 'Status',
+              command: '/lcm status',
+              hint: 'Session snapshot: message counts, DAG depth, provider, tail.',
+              kind: 'secondary'
+            }),
+            jsx(LcmActionRow, {
+              label: 'Diagnostics',
+              command: '/lcm doctor',
+              hint: 'Read-only doctor report: schema, integrity, FTS, DAG health.',
+              kind: 'secondary'
+            }),
+            jsx(LcmActionRow, {
+              label: 'Preview compact',
+              command: '/lcm rotate',
+              hint: 'Read-only preview — what compaction would do, no changes.',
+              kind: 'secondary'
+            }),
             jsx(LcmActionRow, {
               label: 'Compact now',
               command: '/lcm rotate apply',
@@ -481,8 +508,8 @@ function WatchdogPage() {
         children: [
           jsx(StatChip, { tone: (stats.disk_pct ?? 0) >= 80 ? 'warn' : 'good', children: `disk ${stats.disk_pct ?? '?'}%` }),
           jsx(StatChip, { tone: 'muted', children: stats.mem_summary ? stats.mem_summary.split('|')[0].trim().slice(0, 60) : 'mem ?' }),
-          jsx(StatChip, { tone: 'muted', children: `backlog ${stats.lcm_backlog ?? '?'}` }),
-          jsx(StatChip, { tone: stats.lcm_integrity === 'ok' ? 'good' : 'bad', children: `lcm ${stats.lcm_integrity ?? '?'}` })
+          lcmAvailable(data) && jsx(StatChip, { tone: 'muted', children: `backlog ${stats.lcm_backlog ?? '?'}` }),
+          lcmAvailable(data) && jsx(StatChip, { tone: stats.lcm_integrity === 'ok' ? 'good' : 'bad', children: `lcm ${stats.lcm_integrity ?? '?'}` })
         ]
       })
     ]
@@ -494,7 +521,7 @@ function WatchdogPage() {
 const plugin = {
   id: ID,
   name: 'Watchdog',
-  description: 'System + LCM watchdog — statusbar chip, live checks, watched sources, alert history, one-click LCM compact/backup.',
+  description: 'System + LCM watchdog — statusbar chip, live checks, watched sources, alert history, one-click LCM actions (status, diagnostics, compact, backup).',
   register(ctx) {
     ctx.registerMany([
       {
@@ -548,6 +575,10 @@ const plugin = {
           keywords: ['watchdog', 'lcm', 'compact', 'rotate', 'cleanup', 'context'],
           run: () => {
             haptic('tap')
+            if (!lcmAvailable(queryClient.getQueryData(STATUS_KEY))) {
+              console.warn('[watchdog] LCM not available — compact skipped')
+              return
+            }
             runLcmCommand('/lcm rotate apply').catch(err => {
               console.error('[watchdog] compact lcm failed', err)
             })
@@ -563,6 +594,10 @@ const plugin = {
           keywords: ['watchdog', 'lcm', 'backup', 'snapshot'],
           run: () => {
             haptic('tap')
+            if (!lcmAvailable(queryClient.getQueryData(STATUS_KEY))) {
+              console.warn('[watchdog] LCM not available — backup skipped')
+              return
+            }
             runLcmCommand('/lcm backup').catch(err => {
               console.error('[watchdog] backup lcm failed', err)
             })

@@ -174,7 +174,8 @@ def check_lcm() -> dict:
         details.append({"status": "critical", "label": "lcm.db", "detail": str(exc)})
 
     return {"id": "lcm", "name": "LCM embedding health", "state": state,
-            "summary": summary, "details": details}
+            "summary": summary, "details": details,
+            "available": os.path.exists(LCM_HEALTH) and os.path.exists(LCM_DB)}
 
 
 def _human_duration(s: int) -> str:
