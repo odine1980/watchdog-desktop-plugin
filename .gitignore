@@ -1,0 +1,6 @@
+# Watchdog plugin project
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
