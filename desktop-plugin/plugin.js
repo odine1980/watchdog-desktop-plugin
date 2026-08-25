@@ -10,7 +10,7 @@
  * Plain ESM, loaded uncompiled — UI is jsx() calls, not JSX syntax.
  * Only these imports resolve: @hermes/plugin-sdk, react, react/jsx-runtime.
  *
- * If your Hermes VM's Tailscale IP ever changes, update API_BASE below.
+ * If your Hermes VM's LAN IP (127.0.0.1) ever changes, update API_BASE below.
  */
 
 import {
@@ -260,7 +260,7 @@ function WatchdogPage() {
         jsx('div', { className: 'font-medium', children: 'Watchdog backend unreachable' }),
         jsx('div', {
           className: 'font-mono text-[0.75rem] text-(--ui-text-tertiary)',
-          children: `${API_BASE} — is the status service running? (uvicorn watchdog_api:app --host 127.0.0.1 --port 8766)`
+          children: `${API_BASE} — is the status service running? (uvicorn watchdog_api:app --host 0.0.0.0 --port 8766)`
         }),
         jsx('button', {
           className: cn(
