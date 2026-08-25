@@ -2,15 +2,13 @@
  * Watchdog — statusbar chip + watchdog pane for the Hermes desktop app.
  *
  * Backend: a standalone FastAPI service on the Hermes host
- *   http://127.0.0.1:8766   (Tailscale IP, port 8766, read-only)
+ *   http://127.0.0.1:8766   (default; override WATCHDOG_API_BASE / edit below)
  * The service shells out to the SAME check scripts the daily cron watchdog
  * uses (~/.hermes/scripts/lcm_daily_check.py + lcm_health_check.py), so this
  * pane and the cron always agree — one source of truth.
  *
  * Plain ESM, loaded uncompiled — UI is jsx() calls, not JSX syntax.
  * Only these imports resolve: @hermes/plugin-sdk, react, react/jsx-runtime.
- *
- * If your Hermes VM's LAN IP (127.0.0.1) ever changes, update API_BASE below.
  */
 
 import {
@@ -32,6 +30,10 @@ import {
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'watchdog'
+// Point this at your watchdog API.
+//   - Hermes on this machine:        http://127.0.0.1:8766  (default)
+//   - Remote Hermes host (Tailscale): http://<tailscale-ip>:8766
+//   - Remote Hermes host (LAN):       http://<lan-ip>:8766
 const API_BASE = 'http://127.0.0.1:8766'
 const STATUS_KEY = ['watchdog-status']
 const SOURCES_KEY = ['watchdog-sources']

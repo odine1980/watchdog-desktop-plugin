@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """Watchdog status API — the visibility layer for the watchdog desktop plugin.
 
-Mirrors the checks in ~/.hermes/scripts/lcm_daily_check.py (the daily cron,
-source of truth, UNTOUCHED — this service does not modify it):
+Mirrors the checks in the daily cron watchdog script
+(SCRIPTS/lcm_daily_check.py, the source of truth — this service does not
+modify it):
 
   - LCM embedding health -> shells out to the SAME lcm_health_check.py so the
     pane and the cron always agree (one source of truth)
   - Disk usage           -> df, threshold 80% (DAILY_DISK_ALERT_PCT env)
   - Memory / load        -> free + /proc/loadavg (informational)
   - Key processes        -> pgrep ollama, gateway
-  - Cron health          -> ~/.hermes/cron/jobs.json audit (failures + staleness)
+  - Cron health          -> HERMES_HOME/cron/jobs.json audit (failures +
+    staleness)
 
 plus two read-only lcm.db extras: SQLite integrity and summary backlog.
 
 Read-only by design: /run-check only RE-RUNS checks; nothing here mutates.
-Bound to the Tailscale IP only (127.0.0.1:8766), never 0.0.0.0.
-CORS is open because the desktop app renderer fetches cross-origin; the
-surface is Tailscale-only and read-only. Add a token if you ever expose it
-wider.
+Bind via WATCHDOG_HOST/WATCHDOG_PORT (default 127.0.0.1:8766) — keep it on a
+private interface. CORS is open because the desktop app renderer fetches
+cross-origin. Add a token before ever exposing it wider.
 """
 
 from __future__ import annotations
@@ -38,10 +39,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-SCRIPTS = "~/.hermes/scripts"
-LCM_DB = os.path.expanduser("~/.hermes/lcm.db")
-CRON_JSON = "~/.hermes/cron/jobs.json"
-LCM_HEALTH = f"{SCRIPTS}/lcm_health_check.py"
+HERMES_HOME = os.path.expanduser(os.environ.get("HERMES_HOME", "~/.hermes"))
+SCRIPTS = os.path.join(HERMES_HOME, "scripts")
+LCM_DB = os.path.join(HERMES_HOME, "lcm.db")
+CRON_JSON = os.path.join(HERMES_HOME, "cron", "jobs.json")
+LCM_HEALTH = os.path.join(SCRIPTS, "lcm_health_check.py")
 DISK_THRESHOLD_PCT = int(os.environ.get("DAILY_DISK_ALERT_PCT", "80"))
 WANTED_PROCESSES = ["ollama", "gateway"]
 SELF_SCRIPT = "lcm_daily_check.py"  # cron script to skip in the staleness audit
@@ -544,4 +546,8 @@ def run_check(_body: RunCheckRequest | None = None) -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8766)
+    uvicorn.run(
+        app,
+        host=os.environ.get("WATCHDOG_HOST", "127.0.0.1"),
+        port=int(os.environ.get("WATCHDOG_PORT", "8766")),
+    )
