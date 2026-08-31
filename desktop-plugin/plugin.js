@@ -521,6 +521,7 @@ function WatchdogPage() {
 const plugin = {
   id: ID,
   name: 'Watchdog',
+  version: '1.0.1',
   description: 'System + LCM watchdog — statusbar chip, live checks, watched sources, alert history, one-click LCM actions (status, diagnostics, compact, backup).',
   register(ctx) {
     ctx.registerMany([
