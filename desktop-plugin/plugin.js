@@ -1,5 +1,6 @@
 /**
  * Watchdog — statusbar chip + watchdog pane for the Hermes desktop app.
+ * @version 1.0.2
  *
  * Backend: the watchdog's own small FastAPI status service on the Hermes
  * host. It is NOT the Hermes gateway (`hermes gateway`), NOT the Hermes web
