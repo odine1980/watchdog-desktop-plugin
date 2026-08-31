@@ -301,7 +301,7 @@ function AlertRow({ a }) {
   })
 }
 
-function SectionCard({ title, count, children }) {
+function SectionCard({ title, count, caption, children }) {
   return jsxs('div', {
     className: 'rounded-lg border border-(--ui-stroke-secondary) p-2',
     children: [
@@ -312,15 +312,19 @@ function SectionCard({ title, count, children }) {
           jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: count })
         ]
       }),
+      caption
+        ? jsx('div', { className: 'mb-1 px-1 text-[0.6875rem] leading-snug text-(--ui-text-tertiary)', children: caption })
+        : null,
       children
     ]
   })
 }
 
 /** LCM action row: one-click compact / backup into the active session. */
-function LcmActionRow({ label, command, hint, kind }) {
+function LcmActionRow({ label, command, hint, kind, disabled }) {
   const action = useLcmAction(command)
   const busy = action.isPending
+  const off = disabled || busy
 
   return jsxs('div', {
     className: 'flex items-center gap-2 py-1',
@@ -334,7 +338,8 @@ function LcmActionRow({ label, command, hint, kind }) {
           'disabled:opacity-60'
         ),
         type: 'button',
-        disabled: busy,
+        disabled: off,
+        title: off ? (disabled ? 'Needs an active session' : hint) : hint,
         onClick: () => action.mutate(),
         children: jsxs('span', {
           className: 'inline-flex items-center gap-1',
@@ -403,7 +408,8 @@ function WatchdogPage() {
             children: [
               jsx(StatusDot, { tone }),
               jsx('span', { className: 'font-medium', children: 'Watchdog' }),
-              jsx('span', { className: 'text-(--ui-text-tertiary)', children: label })
+              jsx('span', { className: 'text-(--ui-text-tertiary)', children: label }),
+              jsx('span', { className: 'font-mono text-[0.6875rem] text-(--ui-text-quaternary)', children: `v${plugin.version}` })
             ]
           }),
           jsxs('div', {
@@ -442,6 +448,7 @@ function WatchdogPage() {
         count: active
           ? `${active.message_count ?? '?'} msgs · ${String(active.id || '').slice(-8)}`
           : (sessionQ.isError ? 'gateway unreachable' : 'no active session'),
+        caption: 'Compact + backup manage the context directly — they work with embeddings off (only semantic search is disabled). Buttons need an active session.',
         children: jsxs('div', {
           className: 'flex flex-col',
           children: [
@@ -449,31 +456,36 @@ function WatchdogPage() {
               label: 'Status',
               command: '/lcm status',
               hint: 'Session snapshot: message counts, DAG depth, provider, tail.',
-              kind: 'secondary'
+              kind: 'secondary',
+              disabled: !active
             }),
             jsx(LcmActionRow, {
               label: 'Diagnostics',
               command: '/lcm doctor',
               hint: 'Read-only doctor report: schema, integrity, FTS, DAG health.',
-              kind: 'secondary'
+              kind: 'secondary',
+              disabled: !active
             }),
             jsx(LcmActionRow, {
               label: 'Preview compact',
               command: '/lcm rotate',
               hint: 'Read-only preview — what compaction would do, no changes.',
-              kind: 'secondary'
+              kind: 'secondary',
+              disabled: !active
             }),
             jsx(LcmActionRow, {
               label: 'Compact now',
               command: '/lcm rotate apply',
               hint: 'Compacts this session in place (backup-first, tail-preserving). May take minutes — output lands in chat.',
-              kind: 'primary'
+              kind: 'primary',
+              disabled: !active
             }),
             jsx(LcmActionRow, {
               label: 'Backup first',
               command: '/lcm backup',
               hint: 'Timestamped SQLite snapshot before any cleanup.',
-              kind: 'secondary'
+              kind: 'secondary',
+              disabled: !active
             })
           ]
         })
@@ -521,7 +533,7 @@ function WatchdogPage() {
 const plugin = {
   id: ID,
   name: 'Watchdog',
-  version: '1.0.1',
+  version: '1.0.2',
   description: 'System + LCM watchdog — statusbar chip, live checks, watched sources, alert history, one-click LCM actions (status, diagnostics, compact, backup).',
   register(ctx) {
     ctx.registerMany([
