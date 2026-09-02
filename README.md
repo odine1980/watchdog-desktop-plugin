@@ -141,17 +141,10 @@ cp watchdog-desktop-plugin/desktop-plugin/plugin.js ~/.hermes/desktop-plugins/wa
 - **Stale version** → **⌘K → Reload desktop plugins**; if it persists, restart the desktop app.
 - **LCM actions card missing** → the backend reports LCM not present (no `lcm.db`/health script); the card hides itself by design.
 
-## Releasing (version stamping)
+## Contributing
 
-The plugin version lives in exactly one place: the **git tag**. `scripts/stamp-version.sh` reads the newest tag and stamps it into both the `@version` header line and the `version:` field of `plugin.js` — the version never needs hand-editing.
-
-```bash
-git tag v1.0.3
-./scripts/stamp-version.sh     # stamps "1.0.3" into desktop-plugin/plugin.js
-git add desktop-plugin/plugin.js CHANGELOG.md
-git commit -m "release v1.0.3"
-git push --follow-tags
-```
+Maintainer + release workflow (version stamping) lives in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
