@@ -30,9 +30,6 @@ import sqlite3
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
@@ -48,13 +45,12 @@ DISK_THRESHOLD_PCT = int(os.environ.get("DAILY_DISK_ALERT_PCT", "80"))
 WANTED_PROCESSES = ["ollama", "gateway"]
 SELF_SCRIPT = "lcm_daily_check.py"  # cron script to skip in the staleness audit
 
-# ---------------- config + state (Phase 3: thresholds, alerts, sources) ------
+# ---------------- config + state (thresholds, alerts) -------------------------
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_JSON = os.path.join(PROJECT_DIR, "watchdog_config.json")
 STATE_DIR = os.path.join(PROJECT_DIR, "state")
 ALERTS_JSON = os.path.join(STATE_DIR, "alerts.json")
-SOURCES_JSON = os.path.join(STATE_DIR, "sources.json")
 
 DEFAULT_CONFIG = {
     "thresholds": {
@@ -62,11 +58,7 @@ DEFAULT_CONFIG = {
         "backlog_s": 6 * 3600,
     },
     "alerts": {"max_kept": 50},
-    "sources": [],
 }
-
-# user-agent for RSS / GitHub fetches (GitHub API requires a UA)
-UA = "watchdog/0.2 (+tailscale-only)"
 
 app = FastAPI(title="Watchdog status API", version="0.2.0")
 app.add_middleware(
@@ -372,109 +364,10 @@ def update_alerts(checks: list[dict]) -> list[dict]:
     return alerts
 
 
-# ---------------- Watched sources (RSS + GitHub, watermark cursors) -----------
-
-def _fetch(url: str, timeout: int = 10):
-    req = urllib.request.Request(url, headers={
-        "User-Agent": UA,
-        "Accept": "application/rss+xml, application/atom+xml, application/json, */*",
-    })
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.status, r.read().decode("utf-8", "replace"), dict(r.headers)
-
-
-def _rss_items(body: str) -> list[str]:
-    """First N item ids (guid > link > title) from RSS 2.0 or Atom."""
-    root = ET.fromstring(body)
-    ns = ""
-    if root.tag.startswith("{"):
-        ns = root.tag.split("}")[0] + "}"
-    items = root.findall(f".//{ns}item")
-    if not items:
-        items = root.findall(".//{http://www.w3.org/2005/Atom}entry")
-        ns = "{http://www.w3.org/2005/Atom}"
-    out = []
-    for it in items[:50]:
-        guid = it.find(f"{ns}guid")
-        key = guid.text if guid is not None else None
-        if not key:
-            link = it.find(f"{ns}link")
-            key = link.text if link is not None else None
-        if not key:
-            title = it.find(f"{ns}title")
-            key = (title.text if title is not None else "") or ""
-        out.append(key)
-    return out
-
-
-def _fmt_epoch(ts) -> str:
-    try:
-        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%H:%M UTC")
-    except Exception:
-        return "soon"
-
-
-def check_sources() -> dict:
-    """Poll each configured source, track a watermark cursor per source in
-    state/sources.json, and report new-item counts. Failures degrade that
-    source only (informational, never flips the overall chip)."""
-    cfg = load_config()
-    st = _read_json(SOURCES_JSON, {})
-    sources = []
-    for src in cfg["sources"]:
-        sid = src["id"]
-        prev = st.get(sid, {})
-        entry = {
-            "id": sid, "name": src["name"], "kind": src["kind"],
-            "status": "ok", "new_count": 0,
-            "watermark": prev.get("watermark"),
-            "detail": None, "checked_at": _now_iso(),
-        }
-        try:
-            if src["kind"] == "rss":
-                _, body, _ = _fetch(src["url"])
-                items = _rss_items(body)
-                if not items:
-                    raise ValueError("empty feed")
-                wm = entry["watermark"]
-                if wm is None:
-                    entry["watermark"] = items[0]
-                elif wm in items:
-                    entry["new_count"] = items.index(wm)
-                else:
-                    # watermark rolled off the feed; count what's visible once,
-                    # then advance so we don't re-count the same items forever
-                    entry["new_count"] = len(items)
-                    entry["watermark"] = items[0]
-            elif src["kind"] == "github":
-                _, body, _ = _fetch(
-                    f"https://api.github.com/repos/{src['repo']}/{src.get('ref') or 'releases/latest'}"
-                )
-                data = json.loads(body)
-                cur = data.get("tag_name") or data.get("name") or str(data.get("id", ""))
-                wm = entry["watermark"]
-                if wm is None:
-                    entry["watermark"] = cur
-                elif cur != wm:
-                    entry["new_count"] = 1
-                    entry["watermark"] = cur
-        except urllib.error.HTTPError as exc:
-            entry["status"] = "degraded"
-            if exc.code == 403 and exc.headers.get("X-RateLimit-Remaining") == "0":
-                entry["detail"] = (
-                    "GitHub API rate limited (resets "
-                    f"{_fmt_epoch(exc.headers.get('X-RateLimit-Reset'))})"
-                )
-            else:
-                entry["detail"] = f"HTTP {exc.code} {exc.reason}"
-        except Exception as exc:
-            entry["status"] = "degraded"
-            entry["detail"] = f"{type(exc).__name__}: {str(exc)[:160]}"
-        sources.append(entry)
-        st[sid] = {"watermark": entry["watermark"], "status": entry["status"],
-                   "detail": entry["detail"]}
-    _write_json_atomic(SOURCES_JSON, st)
-    return {"generated_at": _now_iso(), "sources": sources}
+# ---------------- Watched sources: REMOVED (2026-09-28) ------------------------
+# The RSS/GitHub watched-sources feature was removed from Watchdog — feed
+# watching belongs to dedicated desktop plugins. Use the `newswire` desktop
+# plugin (or another RSS desktop plugin) if you need feeds.
 
 
 # ---------------- Aggregation + endpoints ------------------------------------
@@ -523,16 +416,10 @@ def alerts() -> dict:
     return {"generated_at": _now_iso(), "alerts": st.get("alerts", [])}
 
 
-@app.get("/sources")
-def sources() -> dict:
-    return check_sources()
-
-
 @app.get("/config")
 def config() -> dict:
     cfg = load_config()
-    return {"thresholds": cfg["thresholds"], "alerts": cfg["alerts"],
-            "sources": cfg["sources"]}
+    return {"thresholds": cfg["thresholds"], "alerts": cfg["alerts"]}
 
 
 @app.post("/run-check")

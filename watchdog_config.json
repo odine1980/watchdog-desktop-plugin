@@ -5,20 +5,5 @@
   },
   "alerts": {
     "max_kept": 50
-  },
-  "sources": [
-    {
-      "id": "hn",
-      "name": "Hacker News",
-      "kind": "rss",
-      "url": "https://news.ycombinator.com/rss"
-    },
-    {
-      "id": "hermes-agent",
-      "name": "hermes-agent repo",
-      "kind": "github",
-      "repo": "NousResearch/hermes-agent",
-      "ref": "releases/latest"
-    }
-  ]
+  }
 }

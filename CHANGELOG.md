@@ -3,6 +3,16 @@
 All notable changes to the Watchdog desktop plugin + backend are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+
+- **Watched sources (RSS feeds + GitHub release watcher)** — feed watching now
+  belongs to dedicated plugins; use the `newswire` desktop plugin (or another
+  RSS desktop plugin) if you need it. Drops the `/sources` endpoint, the
+  `sources[]` config block, the `state/sources.json` cursors, and the pane's
+  Watched sources section. The rest of the pane is unchanged.
+
 ## [1.0.2] - 2026-08-31
 
 ### Added

@@ -7,8 +7,8 @@ A statusbar chip + `/watchdog` **plugin** pane for the [Hermes Agent](https://he
 | Piece | What it does |
 |---|---|
 | **Statusbar chip** | Green "all quiet" / amber "degraded" / red "N problems" — one glance, no noise |
-| **`/watchdog` plugin pane** | Live checks, **watched sources** (RSS feeds + a GitHub repo with new-item counts), and an **alert history** (transition log: opens on worsening, resolves on recovery) |
-| **FastAPI backend** | The plugin's own read-only status service — NOT the Hermes gateway (`hermes gateway`), NOT the Hermes web dashboard (`hermes dashboard`, 9119), and NOT the OpenAI-compatible API server (8642). Endpoints: `/health`, `/status`, `/alerts`, `/sources`, `/config`, `/run-check` |
+| **`/watchdog` plugin pane** | Live checks and an **alert history** (transition log: opens on worsening, resolves on recovery), plus one-click LCM actions |
+| **FastAPI backend** | The plugin's own read-only status service — NOT the Hermes gateway (`hermes gateway`), NOT the Hermes web dashboard (`hermes dashboard`, 9119), and NOT the OpenAI-compatible API server (8642). Endpoints: `/health`, `/status`, `/alerts`, `/config`, `/run-check` |
 
 **Design principle: one source of truth.** The backend shells out to the SAME check scripts the daily cron watchdog uses (`~/.hermes/scripts/lcm_daily_check.py` + `lcm_health_check.py`), so the pane and the cron always agree. The cron stays the alerting layer (silent-unless-broken); this plugin is the visibility layer (on-demand, in-app).
 
@@ -20,12 +20,12 @@ A statusbar chip + `/watchdog` **plugin** pane for the [Hermes Agent](https://he
 
 ```
 watchdog_api.py            FastAPI service: /health, /status, /alerts,
-                           /sources, /config, /run-check
-watchdog_config.json       thresholds + watched sources (hot-reloaded)
+                           /config, /run-check
+watchdog_config.json       thresholds + alert settings (hot-reloaded)
 .env.example               backend env vars (copy to .env)
 scripts/stamp-version.sh   stamp the git tag into plugin.js header + version
 state/                     runtime state, gitignored: alerts.json (transition
-                           log), sources.json (watermark cursors)
+                           log)
 desktop-plugin/            plugin.js — the desktop plugin (copy to
                            ~/.hermes/desktop-plugins/watchdog/)
 docs/mockup.html           approved mockup
@@ -108,9 +108,9 @@ To reach it from another machine (e.g. the desktop app in remote mode), bind `--
 
 `update_alerts()` runs on every `/status` poll and records *transitions*, not snapshots: opening an alert when a check worsens, resolving it on recovery, updating severity/message on escalation. The **first run is a silent baseline** — pre-existing problems never spam the history. Persisted atomically to `state/alerts.json`; capped at `alerts.max_kept` (default 50). Active (unresolved) alerts always sort above resolved.
 
-## Watched sources
+## Feeds? Use newswire
 
-Configured in `watchdog_config.json` → `sources[]`. Each source keeps a watermark cursor in `state/sources.json`; `/sources` reports new-item counts since the watermark. RSS uses the item guid (falling back to link, then title); GitHub compares the latest release tag. Fetch failures degrade that source only — they never flip the overall chip. `kind`: `rss` (url) or `github` (repo + ref, default `releases/latest`).
+Watchdog no longer watches RSS feeds or repos — feed tickers belong to dedicated desktop plugins. Use the **newswire** desktop plugin (or another RSS desktop plugin) if you need feed watching.
 
 ## Plugin install
 

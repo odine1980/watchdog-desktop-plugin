@@ -51,7 +51,6 @@ const ID = 'watchdog'
 //   - Remote Hermes host (LAN):       http://<lan-ip>:8766
 const WATCHDOG_BACKEND_URL = 'http://127.0.0.1:8766'
 const STATUS_KEY = ['watchdog-status']
-const SOURCES_KEY = ['watchdog-sources']
 const SESSION_KEY = ['watchdog-session']
 
 // Matches the app's own prompt.submit ack ceiling (agent.gateway_timeout =
@@ -115,19 +114,6 @@ function useRunCheck() {
       return res.json()
     },
     onSuccess: data => qc.setQueryData(STATUS_KEY, data)
-  })
-}
-
-function useSources() {
-  return useQuery({
-    queryKey: SOURCES_KEY,
-    queryFn: async () => {
-      const res = await fetch(`${WATCHDOG_BACKEND_URL}/sources`, { cache: 'no-store' })
-      if (!res.ok) throw new Error(`watchdog api ${res.status}`)
-      return res.json()
-    },
-    refetchInterval: 300_000,
-    staleTime: 120_000
   })
 }
 
@@ -247,35 +233,6 @@ function StatChip({ tone, children }) {
   })
 }
 
-function SourceRow({ src }) {
-  const tone = src.status === 'ok' ? 'good' : 'warn'
-  const val = src.status !== 'ok'
-    ? 'failed'
-    : (src.new_count > 0 ? `${src.new_count} new` : 'up to date')
-  return jsxs('div', {
-    className: 'border-b border-(--ui-stroke-secondary) py-1.5 last:border-b-0',
-    children: [
-      jsxs('div', {
-        className: 'flex items-baseline gap-2',
-        children: [
-          jsx(StatusDot, { tone, className: 'mt-0.5 shrink-0' }),
-          jsx('span', { className: 'font-medium', children: src.name }),
-          jsx('span', {
-            className: 'rounded-full border border-(--ui-stroke-secondary) px-1.5 py-px font-mono text-[0.625rem] uppercase text-(--ui-text-tertiary)',
-            children: src.kind
-          }),
-          jsx('span', { className: 'ml-auto shrink-0 text-(--ui-text-secondary)', children: val }),
-          jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-quaternary)', children: relTime(src.checked_at) })
-        ]
-      }),
-      src.status !== 'ok' && jsx('div', {
-        className: 'mt-1 pl-[1.1rem] font-mono text-[0.6875rem] text-(--ui-text-tertiary)',
-        children: src.detail
-      })
-    ]
-  })
-}
-
 function AlertRow({ a }) {
   const resolved = !!a.resolved_at
   return jsxs('div', {
@@ -363,7 +320,6 @@ function LcmActionRow({ label, command, hint, kind, disabled }) {
 function WatchdogPage() {
   const { data, isError, isFetching, refetch } = useStatus()
   const runCheck = useRunCheck()
-  const sourcesQ = useSources()
   const sessionQ = useSessionInfo()
 
   if (isError) {
@@ -491,22 +447,8 @@ function WatchdogPage() {
           ]
         })
       }),
-      // Watched sources
-      jsx(SectionCard, {
-        title: 'Watched sources',
-        count: sourcesQ.isError
-          ? 'unavailable'
-          : (() => {
-              const bad = (sourcesQ.data?.sources || []).filter(s => s.status !== 'ok').length
-              const total = (sourcesQ.data?.sources || []).length
-              return bad ? `${bad} of ${total} need attention` : `${total}/${total} up to date`
-            })(),
-        children: sourcesQ.isError
-          ? jsx('div', { className: 'px-1 py-1 text-[0.75rem] text-(--ui-text-tertiary)', children: 'Source check unavailable (backend down?).' })
-          : (!sourcesQ.data
-              ? jsx('div', { className: 'px-1 py-1 text-[0.75rem] text-(--ui-text-tertiary)', children: 'Loading…' })
-              : jsx('div', { className: 'flex flex-col', children: sourcesQ.data.sources.map(s => jsx(SourceRow, { src: s }, s.id)) }))
-      }),
+      // Watched sources: removed — use the `newswire` desktop plugin (or
+      // another RSS desktop plugin) if you need feed watching.
       // Alert history
       jsx(SectionCard, {
         title: 'Alert history',
@@ -535,7 +477,7 @@ const plugin = {
   id: ID,
   name: 'Watchdog',
   version: '1.0.2',
-  description: 'System + LCM watchdog — statusbar chip, live checks, watched sources, alert history, one-click LCM actions (status, diagnostics, compact, backup).',
+  description: 'System + LCM watchdog — statusbar chip, live checks, alert history, one-click LCM actions (status, diagnostics, compact, backup).',
   register(ctx) {
     ctx.registerMany([
       {
@@ -576,7 +518,6 @@ const plugin = {
           run: () => {
             haptic('tap')
             queryClient.invalidateQueries({ queryKey: STATUS_KEY })
-            queryClient.invalidateQueries({ queryKey: SOURCES_KEY })
           }
         }
       },
