@@ -124,12 +124,6 @@
   .row.warn .ico { background: var(--warn); }
   .row.crit .ico { background: var(--crit); }
   .row .name { font-weight: 550; }
-  .src {
-    flex: 0 0 auto; font-size: 9.5px; font-weight: 700; letter-spacing: .5px;
-    padding: 1px 6px; border-radius: 4px; text-transform: uppercase;
-    background: var(--surface2); border: 1px solid var(--stroke); color: var(--text3);
-  }
-  .src.github { color: var(--accent); border-color: rgba(139,124,246,.4); }
   .row .val { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--text2); font-variant-numeric: tabular-nums; }
   .row.warn .val { color: var(--warn); }
   .row.crit .val { color: var(--crit); }
@@ -189,11 +183,8 @@
     <div id="checks"></div>
   </div>
 
-  <!-- watched sources (feeds + repos) -->
-  <div class="card">
-    <div class="card-h">Watched sources <span class="count" id="srcCount"></span></div>
-    <div id="sources"></div>
-  </div>
+  <!-- Watched sources: removed — feed watching belongs to dedicated plugins.
+       Use the newswire desktop plugin (or another RSS desktop plugin) if you need feeds. -->
 
   <!-- alert history -->
   <div class="card">
@@ -218,7 +209,6 @@ const STATES = {
       ['Load', '0.09', 'ok', '1m avg'],
       ['Processes', '3/3', 'ok', 'hermes · gateway · ollama'],
       ['Cron jobs', '4/4', 'ok', 'none stale'],
-      ['Sources', '3/3', 'ok', 'hn · selfhosted · repo'],
     ],
     checks: [
       { s: 'ok', name: 'LCM embedding health', val: 'OK', det: '' },
@@ -227,11 +217,6 @@ const STATES = {
       { s: 'ok', name: 'Load average', val: '0.09', det: '' },
       { s: 'ok', name: 'Processes', val: '3/3 up', det: '' },
       { s: 'ok', name: 'Cron job health', val: '4/4 ok', det: '' },
-    ],
-    sources: [
-      { s: 'ok', name: 'Hacker News', type: 'RSS', val: '3 new · 2m ago', det: 'Top new item: "Show HN: Hermes desktop plugins SDK"\nwatermark: #48213 · next check in 10m' },
-      { s: 'ok', name: 'r/selfhosted', type: 'RSS', val: '1 new · 2m ago', det: 'Top new item: "Proxmox + ZFS best practices, 2026 edition"\nwatermark: #881204 · next check in 10m' },
-      { s: 'ok', name: 'NousResearch/hermes-agent', type: 'GitHub', val: 'no release · 2m ago', det: 'stars 234,153 (+3) · 2 new commits · 0 issues flagged\nlatest: "fix: cron delivery topic targeting (4a1f2c9)"' },
     ],
     alerts: [
       ['Yesterday 09:00', 'resolved', 'Disk crossed 80% — resolved by cleanup (81% → 72%)'],
@@ -248,7 +233,6 @@ const STATES = {
       ['Load', '0.09', 'ok', '1m avg'],
       ['Processes', '3/3', 'ok', 'hermes · gateway · ollama'],
       ['Cron jobs', '3/4', 'warn', '1 stale'],
-      ['Sources', '2/3', 'warn', 'hn timeout'],
     ],
     checks: [
       { s: 'ok', name: 'LCM embedding health', val: 'OK', det: '' },
@@ -258,13 +242,7 @@ const STATES = {
       { s: 'ok', name: 'Processes', val: '3/3 up', det: '' },
       { s: 'warn', name: 'Cron job health', val: '1 stale', det: 'Weekly review — last ran 8d ago (7d cadence)\nNext scheduled run: Sun 20:00' },
     ],
-    sources: [
-      { s: 'warn', name: 'Hacker News', type: 'RSS', val: 'FETCH FAILED · 2 retries', det: 'GET https://news.ycombinator.com/rss → timeout after 10s (attempt 3/3)\nLast good check: 09:12 · 14 items seen · watermark #48213' },
-      { s: 'ok', name: 'r/selfhosted', type: 'RSS', val: '1 new · 2m ago', det: 'Top new item: "Proxmox + ZFS best practices, 2026 edition"\nwatermark: #881204 · next check in 10m' },
-      { s: 'warn', name: 'NousResearch/hermes-agent', type: 'GitHub', val: 'release v0.21.1 · 1h ago', det: 'New release: v0.21.1 — "plugin toolset fixes"\n1 issue flagged #watch: "cron delivery_error 403 on discord"\ncommits since last check: 4' },
-    ],
     alerts: [
-      ['Today 08:58', 'active', 'Hacker News RSS unreachable — timeout after 10s'],
       ['Today 08:58', 'active', 'Disk usage 87% — above 80% threshold'],
       ['Yesterday 09:00', 'resolved', 'Disk crossed 80% — resolved by cleanup (81% → 72%)'],
       ['Aug 24 09:00', 'resolved', 'LCM degraded (coverage 98%) — self-healed via backfill'],
@@ -279,7 +257,6 @@ const STATES = {
       ['Load', '3.4', 'warn', '1m avg'],
       ['Processes', '2/3', 'crit', 'gateway DOWN'],
       ['Cron jobs', '2/4', 'crit', '2 failing'],
-      ['Sources', '1/3', 'crit', '2 down'],
     ],
     checks: [
       { s: 'crit', name: 'LCM embedding health', val: 'DEGRADED', det: 'coverage 0/1 — no vectors under active profile\nself-heal attempted 08:58 → STILL DEGRADED\nprovider: voyage / voyage-4-lite (key set)' },
@@ -289,15 +266,8 @@ const STATES = {
       { s: 'crit', name: 'Processes', val: 'gateway DOWN', det: 'pgrep gateway → no match\ncheck: systemctl status hermes-serve · journalctl -u hermes-serve -n 50' },
       { s: 'crit', name: 'Cron job health', val: '2 failing', det: 'Weekly review — failure_streak=2\nAI tech briefing — last_delivery_error=403' },
     ],
-    sources: [
-      { s: 'crit', name: 'Hacker News', type: 'RSS', val: 'DOWN · 6 retries', det: 'GET https://news.ycombinator.com/rss → connection refused\nLast good check: Yesterday 21:04 · watermark #48199' },
-      { s: 'crit', name: 'NousResearch/hermes-agent', type: 'GitHub', val: 'API 403 rate_limited', det: 'GET /repos/NousResearch/hermes-agent → 403 rate limit exceeded\nReset at 10:04 UTC · token: ok · 2 issues flagged #watch' },
-      { s: 'warn', name: 'r/selfhosted', type: 'RSS', val: 'FETCH FAILED · 2 retries', det: 'GET https://www.reddit.com/r/selfhosted/.rss → timeout after 10s (attempt 2/3)' },
-    ],
     alerts: [
       ['Today 08:58', 'active', 'Gateway process down — hermes-serve unreachable'],
-      ['Today 08:58', 'active', 'Hacker News RSS down — connection refused'],
-      ['Today 08:58', 'active', 'hermes-agent GitHub API rate-limited (403)'],
       ['Today 08:58', 'active', 'LCM still degraded after self-heal (coverage 0/1)'],
       ['Today 08:58', 'active', 'Disk usage 93% — critical'],
       ['Yesterday 09:00', 'resolved', 'Disk crossed 80% — resolved by cleanup (81% → 72%)'],
@@ -348,30 +318,7 @@ function render(state) {
     }
   });
 
-  // watched sources
-  const sources = document.getElementById('sources');
-  sources.innerHTML = '';
-  const sBad = s.sources.filter(x => x.s !== 'ok').length;
-  document.getElementById('srcCount').textContent = sBad ? `${sBad} of ${s.sources.length} need attention` : `${s.sources.length}/${s.sources.length} up to date`;
-  s.sources.forEach((c, i) => {
-    const open = c.s !== 'ok' && i === 0 ? ' open' : '';
-    const row = document.createElement('div');
-    row.className = 'row ' + c.s + open;
-    row.innerHTML = `<span class="ico"></span><span class="name">${c.name}</span><span class="src ${c.type.toLowerCase()}">${c.type}</span><span class="val">${c.val}</span><span class="chev">›</span>`;
-    row.addEventListener('click', () => {
-      if (!c.det) return;
-      row.classList.toggle('open');
-    });
-    sources.appendChild(row);
-    if (c.det) {
-      const det = document.createElement('div');
-      det.className = 'detail';
-      det.textContent = c.det;
-      sources.appendChild(det);
-    }
-  });
-
-  // alerts
+  // alert history
   const alerts = document.getElementById('alerts');
   alerts.innerHTML = '';
   document.getElementById('alertCount').textContent = s.alerts.length + ' shown';
